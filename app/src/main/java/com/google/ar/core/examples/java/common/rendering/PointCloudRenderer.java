@@ -12,20 +12,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.ar.core.examples.java.helloar.rendering;
+package com.google.ar.core.examples.java.common.rendering;
 
 import android.content.Context;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
 import com.google.ar.core.PointCloud;
-import com.google.ar.core.examples.java.helloar.R;
-import javax.microedition.khronos.egl.EGLConfig;
-import javax.microedition.khronos.opengles.GL10;
+import java.io.IOException;
 
 /** Renders a point cloud. */
 public class PointCloudRenderer {
   private static final String TAG = PointCloud.class.getSimpleName();
+
+  // Shader names.
+  private static final String VERTEX_SHADER_NAME = "shaders/point_cloud.vert";
+  private static final String FRAGMENT_SHADER_NAME = "shaders/point_cloud.frag";
 
   private static final int BYTES_PER_FLOAT = Float.SIZE / 8;
   private static final int FLOATS_PER_POINT = 4; // X,Y,Z,confidence.
@@ -55,7 +57,7 @@ public class PointCloudRenderer {
    *
    * @param context Needed to access shader source.
    */
-  public void createOnGlThread(Context context) {
+  public void createOnGlThread(Context context) throws IOException {
     ShaderUtil.checkGLError(TAG, "before create");
 
     int[] buffers = new int[1];
@@ -70,10 +72,9 @@ public class PointCloudRenderer {
     ShaderUtil.checkGLError(TAG, "buffer alloc");
 
     int vertexShader =
-        ShaderUtil.loadGLShader(TAG, context, GLES20.GL_VERTEX_SHADER, R.raw.point_cloud_vertex);
+        ShaderUtil.loadGLShader(TAG, context, GLES20.GL_VERTEX_SHADER, VERTEX_SHADER_NAME);
     int passthroughShader =
-        ShaderUtil.loadGLShader(
-            TAG, context, GLES20.GL_FRAGMENT_SHADER, R.raw.passthrough_fragment);
+        ShaderUtil.loadGLShader(TAG, context, GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER_NAME);
 
     programName = GLES20.glCreateProgram();
     GLES20.glAttachShader(programName, vertexShader);

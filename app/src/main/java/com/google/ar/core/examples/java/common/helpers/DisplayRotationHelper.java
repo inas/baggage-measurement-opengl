@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.ar.core.examples.java.helloar;
+package com.google.ar.core.examples.java.common.helpers;
 
 import android.app.Activity;
 import android.content.Context;
@@ -27,7 +27,7 @@ import com.google.ar.core.Session;
  * by the onSurfaceChanged() callback, and thus they require listening to the android display
  * events.
  */
-public class DisplayRotationHelper implements DisplayListener {
+public final class DisplayRotationHelper implements DisplayListener {
   private boolean viewportChanged;
   private int viewportWidth;
   private int viewportHeight;

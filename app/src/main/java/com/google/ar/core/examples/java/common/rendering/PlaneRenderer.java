@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.ar.core.examples.java.helloar.rendering;
+package com.google.ar.core.examples.java.common.rendering;
 
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -25,7 +25,6 @@ import com.google.ar.core.Camera;
 import com.google.ar.core.Plane;
 import com.google.ar.core.Pose;
 import com.google.ar.core.TrackingState;
-import com.google.ar.core.examples.java.helloar.R;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -38,12 +37,14 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import javax.microedition.khronos.egl.EGLConfig;
-import javax.microedition.khronos.opengles.GL10;
 
 /** Renders the detected AR planes. */
 public class PlaneRenderer {
   private static final String TAG = PlaneRenderer.class.getSimpleName();
+
+  // Shader names.
+  private static final String VERTEX_SHADER_NAME = "shaders/plane.vert";
+  private static final String FRAGMENT_SHADER_NAME = "shaders/plane.frag";
 
   private static final int BYTES_PER_FLOAT = Float.SIZE / 8;
   private static final int BYTES_PER_SHORT = Short.SIZE / 8;
@@ -116,9 +117,9 @@ public class PlaneRenderer {
    */
   public void createOnGlThread(Context context, String gridDistanceTextureName) throws IOException {
     int vertexShader =
-        ShaderUtil.loadGLShader(TAG, context, GLES20.GL_VERTEX_SHADER, R.raw.plane_vertex);
+        ShaderUtil.loadGLShader(TAG, context, GLES20.GL_VERTEX_SHADER, VERTEX_SHADER_NAME);
     int passthroughShader =
-        ShaderUtil.loadGLShader(TAG, context, GLES20.GL_FRAGMENT_SHADER, R.raw.plane_fragment);
+        ShaderUtil.loadGLShader(TAG, context, GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER_NAME);
 
     planeProgram = GLES20.glCreateProgram();
     GLES20.glAttachShader(planeProgram, vertexShader);

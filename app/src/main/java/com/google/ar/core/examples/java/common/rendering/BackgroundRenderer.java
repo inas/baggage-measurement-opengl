@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.ar.core.examples.java.helloar.rendering;
+package com.google.ar.core.examples.java.common.rendering;
 
 import android.content.Context;
 import android.opengl.GLES11Ext;
@@ -20,12 +20,10 @@ import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import com.google.ar.core.Frame;
 import com.google.ar.core.Session;
-import com.google.ar.core.examples.java.helloar.R;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
-import javax.microedition.khronos.egl.EGLConfig;
-import javax.microedition.khronos.opengles.GL10;
 
 /**
  * This class renders the AR background from camera feed. It creates and hosts the texture given to
@@ -33,6 +31,10 @@ import javax.microedition.khronos.opengles.GL10;
  */
 public class BackgroundRenderer {
   private static final String TAG = BackgroundRenderer.class.getSimpleName();
+
+  // Shader names.
+  private static final String VERTEX_SHADER_NAME = "shaders/screenquad.vert";
+  private static final String FRAGMENT_SHADER_NAME = "shaders/screenquad.frag";
 
   private static final int COORDS_PER_VERTEX = 3;
   private static final int TEXCOORDS_PER_VERTEX = 2;
@@ -61,7 +63,7 @@ public class BackgroundRenderer {
    *
    * @param context Needed to access shader source.
    */
-  public void createOnGlThread(Context context) {
+  public void createOnGlThread(Context context) throws IOException {
     // Generate the background texture.
     int[] textures = new int[1];
     GLES20.glGenTextures(1, textures, 0);
@@ -97,10 +99,9 @@ public class BackgroundRenderer {
     quadTexCoordTransformed = bbTexCoordsTransformed.asFloatBuffer();
 
     int vertexShader =
-        ShaderUtil.loadGLShader(TAG, context, GLES20.GL_VERTEX_SHADER, R.raw.screenquad_vertex);
+        ShaderUtil.loadGLShader(TAG, context, GLES20.GL_VERTEX_SHADER, VERTEX_SHADER_NAME);
     int fragmentShader =
-        ShaderUtil.loadGLShader(
-            TAG, context, GLES20.GL_FRAGMENT_SHADER, R.raw.screenquad_fragment_oes);
+        ShaderUtil.loadGLShader(TAG, context, GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER_NAME);
 
     quadProgram = GLES20.glCreateProgram();
     GLES20.glAttachShader(quadProgram, vertexShader);
