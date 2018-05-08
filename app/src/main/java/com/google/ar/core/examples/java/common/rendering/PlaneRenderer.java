@@ -80,6 +80,7 @@ public class PlaneRenderer {
   private int planeXZPositionAlphaAttribute;
 
   private int planeModelUniform;
+  private int planeNormalUniform;
   private int planeModelViewProjectionUniform;
   private int textureUniform;
   private int lineColorUniform;
@@ -149,6 +150,7 @@ public class PlaneRenderer {
     planeXZPositionAlphaAttribute = GLES20.glGetAttribLocation(planeProgram, "a_XZPositionAlpha");
 
     planeModelUniform = GLES20.glGetUniformLocation(planeProgram, "u_Model");
+    planeNormalUniform = GLES20.glGetUniformLocation(planeProgram, "u_Normal");
     planeModelViewProjectionUniform =
         GLES20.glGetUniformLocation(planeProgram, "u_ModelViewProjection");
     textureUniform = GLES20.glGetUniformLocation(planeProgram, "u_Texture");
@@ -246,7 +248,7 @@ public class PlaneRenderer {
     }
   }
 
-  private void draw(float[] cameraView, float[] cameraPerspective) {
+  private void draw(float[] cameraView, float[] cameraPerspective, float[] planeNormal) {
     // Build the ModelView and ModelViewProjection matrices
     // for calculating cube position and light.
     Matrix.multiplyMM(modelViewMatrix, 0, cameraView, 0, modelMatrix, 0);
@@ -264,6 +266,7 @@ public class PlaneRenderer {
 
     // Set the Model and ModelViewProjection matrices in the shader.
     GLES20.glUniformMatrix4fv(planeModelUniform, 1, false, modelMatrix, 0);
+    GLES20.glUniform3f(planeNormalUniform, planeNormal[0], planeNormal[1], planeNormal[2]);
     GLES20.glUniformMatrix4fv(
         planeModelViewProjectionUniform, 1, false, modelViewProjectionMatrix, 0);
 
@@ -295,23 +298,13 @@ public class PlaneRenderer {
     // Planes must be sorted by distance from camera so that we draw closer planes first, and
     // they occlude the farther planes.
     List<SortablePlane> sortedPlanes = new ArrayList<>();
-    float[] normal = new float[3];
-    float cameraX = cameraPose.tx();
-    float cameraY = cameraPose.ty();
-    float cameraZ = cameraPose.tz();
+
     for (Plane plane : allPlanes) {
       if (plane.getTrackingState() != TrackingState.TRACKING || plane.getSubsumedBy() != null) {
         continue;
       }
 
-      Pose center = plane.getCenterPose();
-      // Get transformed Y axis of plane's coordinate system.
-      center.getTransformedAxis(1, 1.0f, normal, 0);
-      // Compute dot product of plane's normal with vector from camera to plane center.
-      float distance =
-          (cameraX - center.tx()) * normal[0]
-              + (cameraY - center.ty()) * normal[1]
-              + (cameraZ - center.tz()) * normal[2];
+      float distance = calculateDistanceToPlane(plane.getCenterPose(), cameraPose);
       if (distance < 0) { // Plane is back-facing.
         continue;
       }
@@ -367,6 +360,10 @@ public class PlaneRenderer {
       float[] planeMatrix = new float[16];
       plane.getCenterPose().toMatrix(planeMatrix, 0);
 
+      float[] normal = new float[3];
+      // Get transformed Y axis of plane's coordinate system.
+      plane.getCenterPose().getTransformedAxis(1, 1.0f, normal, 0);
+
       updatePlaneParameters(
           planeMatrix, plane.getExtentX(), plane.getExtentZ(), plane.getPolygon());
 
@@ -394,7 +391,7 @@ public class PlaneRenderer {
       planeAngleUvMatrix[3] = +(float) Math.cos(angleRadians) * vScale;
       GLES20.glUniformMatrix2fv(planeUvMatrixUniform, 1, false, planeAngleUvMatrix, 0);
 
-      draw(cameraView, cameraPerspective);
+      draw(cameraView, cameraPerspective, normal);
     }
 
     // Clean up the state we set
@@ -404,6 +401,21 @@ public class PlaneRenderer {
     GLES20.glDepthMask(true);
 
     ShaderUtil.checkGLError(TAG, "Cleaning up after drawing planes");
+  }
+
+  // Calculate the normal distance to plane from cameraPose, the given planePose should have y axis
+  // parallel to plane's normal, for example plane's center pose or hit test pose.
+  public static float calculateDistanceToPlane(Pose planePose, Pose cameraPose) {
+    float[] normal = new float[3];
+    float cameraX = cameraPose.tx();
+    float cameraY = cameraPose.ty();
+    float cameraZ = cameraPose.tz();
+    // Get transformed Y axis of plane's coordinate system.
+    planePose.getTransformedAxis(1, 1.0f, normal, 0);
+    // Compute dot product of plane's normal with vector from camera to plane center.
+    return (cameraX - planePose.tx()) * normal[0]
+        + (cameraY - planePose.ty()) * normal[1]
+        + (cameraZ - planePose.tz()) * normal[2];
   }
 
   private static void colorRgbaToFloat(float[] planeColor, int colorRgba) {
