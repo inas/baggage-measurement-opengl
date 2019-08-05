@@ -19,6 +19,7 @@ import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.View.OnTouchListener;
+
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
@@ -28,8 +29,9 @@ import java.util.concurrent.BlockingQueue;
  */
 public final class TapHelper implements OnTouchListener {
   private final GestureDetector gestureDetector;
-  private final BlockingQueue<MotionEvent> queuedSingleTaps = new ArrayBlockingQueue<>(16);
-
+    private final BlockingQueue<MotionEvent> queuedSingleTaps = new ArrayBlockingQueue<>(20);
+    private BlockingQueue<Float> queuedScrollDx = new ArrayBlockingQueue<>(20);
+    private BlockingQueue<Float> queuedScrollDy = new ArrayBlockingQueue<>(20);
   /**
    * Creates the tap helper.
    *
@@ -51,6 +53,14 @@ public final class TapHelper implements OnTouchListener {
               public boolean onDown(MotionEvent e) {
                 return true;
               }
+
+                @Override
+                public boolean onScroll(MotionEvent e1, MotionEvent e2,
+                                        float distanceX, float distanceY) {
+                    queuedScrollDx.offer(distanceX);
+                    queuedScrollDy.offer(distanceY);
+                    return true;
+                }
             });
   }
 
@@ -63,7 +73,23 @@ public final class TapHelper implements OnTouchListener {
     return queuedSingleTaps.poll();
   }
 
-  @Override
+    public MotionEvent peek() {
+        return queuedSingleTaps.peek();
+    }
+
+    public int getScrollQueueSize() {
+        return queuedScrollDx.size();
+    }
+
+    public float pollMovementX() {
+        return queuedScrollDx.poll();
+    }
+
+    public float pollMovementY() {
+        return queuedScrollDy.poll();
+    }
+
+    @Override
   public boolean onTouch(View view, MotionEvent motionEvent) {
     return gestureDetector.onTouchEvent(motionEvent);
   }

@@ -18,11 +18,13 @@ package com.google.ar.core.examples.java.helloar;
 
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
+import android.opengl.Matrix;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.widget.Toast;
+
 import com.google.ar.core.Anchor;
 import com.google.ar.core.ArCoreApk;
 import com.google.ar.core.Camera;
@@ -32,6 +34,7 @@ import com.google.ar.core.Plane;
 import com.google.ar.core.Point;
 import com.google.ar.core.Point.OrientationMode;
 import com.google.ar.core.PointCloud;
+import com.google.ar.core.Pose;
 import com.google.ar.core.Session;
 import com.google.ar.core.Trackable;
 import com.google.ar.core.TrackingState;
@@ -42,17 +45,20 @@ import com.google.ar.core.examples.java.common.helpers.SnackbarHelper;
 import com.google.ar.core.examples.java.common.helpers.TapHelper;
 import com.google.ar.core.examples.java.common.rendering.BackgroundRenderer;
 import com.google.ar.core.examples.java.common.rendering.ObjectRenderer;
-import com.google.ar.core.examples.java.common.rendering.ObjectRenderer.BlendMode;
 import com.google.ar.core.examples.java.common.rendering.PlaneRenderer;
 import com.google.ar.core.examples.java.common.rendering.PointCloudRenderer;
+import com.google.ar.core.examples.java.common.rendering.RectanglePolygonRenderer;
 import com.google.ar.core.exceptions.CameraNotAvailableException;
+import com.google.ar.core.exceptions.NotTrackingException;
 import com.google.ar.core.exceptions.UnavailableApkTooOldException;
 import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException;
 import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException;
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException;
 import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException;
+
 import java.io.IOException;
 import java.util.ArrayList;
+
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
@@ -79,10 +85,19 @@ public class HelloArActivity extends AppCompatActivity implements GLSurfaceView.
   private final ObjectRenderer virtualObjectShadow = new ObjectRenderer();
   private final PlaneRenderer planeRenderer = new PlaneRenderer();
   private final PointCloudRenderer pointCloudRenderer = new PointCloudRenderer();
-
-  // Temporary matrix allocated here to reduce number of allocations for each frame.
+    private final float cubeHitAreaRadius = 0.08f;
+    private final float[] centerVertexOfCube = {0f, 0f, 0f, 1};
+    private final float[] vertexResult = new float[4];
+    private final int DEFAULT_VALUE = -1;
+    // Temporary matrix allocated here to reduce number of allocations for each frame.
   private final float[] anchorMatrix = new float[16];
+    private final ArrayList<ColoredAnchor> duplicateAnchors = new ArrayList<>();
+    private final float[] mPoseTranslation = new float[3];
+    private final float[] mPoseRotation = new float[4];
+    private RectanglePolygonRenderer rectRenderer = null;
   private static final float[] DEFAULT_COLOR = new float[] {0f, 0f, 0f, 0f};
+    private int nowTouchingPointIndex = DEFAULT_VALUE;
+    private int viewWidth = 0;
 
   private static final String SEARCHING_PLANE_MESSAGE = "Searching for surfaces...";
 
@@ -98,28 +113,11 @@ public class HelloArActivity extends AppCompatActivity implements GLSurfaceView.
   }
 
   private final ArrayList<ColoredAnchor> anchors = new ArrayList<>();
-
-  @Override
-  protected void onCreate(Bundle savedInstanceState) {
-    super.onCreate(savedInstanceState);
-    setContentView(R.layout.activity_main);
-    surfaceView = findViewById(R.id.surfaceview);
-    displayRotationHelper = new DisplayRotationHelper(/*context=*/ this);
-
-    // Set up tap listener.
-    tapHelper = new TapHelper(/*context=*/ this);
-    surfaceView.setOnTouchListener(tapHelper);
-
-    // Set up renderer.
-    surfaceView.setPreserveEGLContextOnPause(true);
-    surfaceView.setEGLContextClientVersion(2);
-    surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0); // Alpha used for plane blending.
-    surfaceView.setRenderer(this);
-    surfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
-    surfaceView.setWillNotDraw(false);
-
-    installRequested = false;
-  }
+    private int viewHeight = 0;
+    private float[] tempTranslation = new float[3];
+    private float[] tempRotation = new float[4];
+    private ArrayList<Float> showingTapPointX = new ArrayList<>();
+    private ArrayList<Float> showingTapPointY = new ArrayList<>();
 
   @Override
   protected void onResume() {
@@ -220,6 +218,30 @@ public class HelloArActivity extends AppCompatActivity implements GLSurfaceView.
     FullScreenHelper.setFullScreenOnWindowFocusChanged(this, hasFocus);
   }
 
+    private boolean isVerticalMode = false;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        surfaceView = findViewById(R.id.surfaceview);
+        displayRotationHelper = new DisplayRotationHelper(/*context=*/ this);
+
+        // Set up tap listener.
+        tapHelper = new TapHelper(/*context=*/ this);
+        surfaceView.setOnTouchListener(tapHelper);
+
+        // Set up renderer.
+        surfaceView.setPreserveEGLContextOnPause(true);
+        surfaceView.setEGLContextClientVersion(2);
+        surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0); // Alpha used for plane blending.
+        surfaceView.setRenderer(this);
+        surfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+        surfaceView.setWillNotDraw(false);
+
+        installRequested = false;
+    }
+
   @Override
   public void onSurfaceCreated(GL10 gl, EGLConfig config) {
     GLES20.glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
@@ -230,14 +252,15 @@ public class HelloArActivity extends AppCompatActivity implements GLSurfaceView.
       backgroundRenderer.createOnGlThread(/*context=*/ this);
       planeRenderer.createOnGlThread(/*context=*/ this, "models/trigrid.png");
       pointCloudRenderer.createOnGlThread(/*context=*/ this);
+        rectRenderer = new RectanglePolygonRenderer();
 
-      virtualObject.createOnGlThread(/*context=*/ this, "models/andy.obj", "models/andy.png");
-      virtualObject.setMaterialProperties(0.0f, 2.0f, 0.5f, 6.0f);
+        virtualObject.createOnGlThread(/*context=*/ this, "models/cube.obj", "models/cube_green.png");
+        virtualObject.setMaterialProperties(0.0f, 3.5f, 1.0f, 6.0f);
 
       virtualObjectShadow.createOnGlThread(
-          /*context=*/ this, "models/andy_shadow.obj", "models/andy_shadow.png");
-      virtualObjectShadow.setBlendMode(BlendMode.Shadow);
-      virtualObjectShadow.setMaterialProperties(1.0f, 0.0f, 0.0f, 1.0f);
+              /*context=*/ this, "models/cube.obj", "models/cube_cyan.png");
+//      virtualObjectShadow.setBlendMode(BlendMode.Shadow);
+        virtualObjectShadow.setMaterialProperties(0.0f, 3.5f, 1.0f, 6.0f);
 
     } catch (IOException e) {
       Log.e(TAG, "Failed to read an asset file", e);
@@ -248,7 +271,22 @@ public class HelloArActivity extends AppCompatActivity implements GLSurfaceView.
   public void onSurfaceChanged(GL10 gl, int width, int height) {
     displayRotationHelper.onSurfaceChanged(width, height);
     GLES20.glViewport(0, 0, width, height);
+      viewWidth = width;
+      viewHeight = height;
+      nowTouchingPointIndex = DEFAULT_VALUE;
   }
+
+    /**
+     * Checks if we detected at least one plane.
+     */
+    private boolean hasTrackingPlane() {
+        for (Plane plane : session.getAllTrackables(Plane.class)) {
+            if (plane.getTrackingState() == TrackingState.TRACKING) {
+                return true;
+            }
+        }
+        return false;
+    }
 
   @Override
   public void onDrawFrame(GL10 gl) {
@@ -270,9 +308,6 @@ public class HelloArActivity extends AppCompatActivity implements GLSurfaceView.
       // camera framerate.
       Frame frame = session.update();
       Camera camera = frame.getCamera();
-
-      // Handle one tap per frame.
-      handleTap(frame, camera);
 
       // If frame is ready, render camera preview image to the GL surface.
       backgroundRenderer.draw(frame);
@@ -303,6 +338,7 @@ public class HelloArActivity extends AppCompatActivity implements GLSurfaceView.
       try (PointCloud pointCloud = frame.acquirePointCloud()) {
         pointCloudRenderer.update(pointCloud);
         pointCloudRenderer.draw(viewmtx, projmtx);
+          pointCloud.release();
       }
 
       // No tracking error at this point. If we detected any plane, then hide the
@@ -317,7 +353,83 @@ public class HelloArActivity extends AppCompatActivity implements GLSurfaceView.
       planeRenderer.drawPlanes(
           session.getAllTrackables(Plane.class), camera.getDisplayOrientedPose(), projmtx);
 
-      // Visualize anchors created by touch.
+        if (anchors.size() > 0) {
+
+            if (nowTouchingPointIndex != DEFAULT_VALUE) {
+                drawObj(getPose(anchors.get(nowTouchingPointIndex)), virtualObjectShadow, viewmtx, projmtx, colorCorrectionRgba);
+                selectIfHit(virtualObjectShadow, nowTouchingPointIndex);
+            }
+
+            Pose point1;
+            // draw first cube
+            Pose point0 = getPose(anchors.get(0));
+            drawObj(point0, virtualObject, viewmtx, projmtx, colorCorrectionRgba);
+            selectIfHit(virtualObject, 0);
+            // draw the rest cube
+            for (int i = 1; i < anchors.size(); i++) {
+                point1 = getPose(anchors.get(i));
+//              log("onDrawFrame()", "before drawObj()");
+                drawObj(point1, virtualObject, viewmtx, projmtx, colorCorrectionRgba);
+                selectIfHit(virtualObject, i);
+//              log("onDrawFrame()", "before drawLine()");
+                drawLine(point0, point1, viewmtx, projmtx);
+
+//              float distanceCm = ((int) (getDistance(point0, point1) * 1000)) / 10.0f;
+//              total += distanceCm;
+//              sb.append(" + ").append(distanceCm);
+
+                point0 = point1;
+            }
+
+            if (nowTouchingPointIndex == 0 && anchors.size() > 2 || isVerticalMode) {
+                drawLine(getPose(anchors.get(anchors.size() - 1)), getPose(anchors.get(0)), viewmtx, projmtx);
+                if (!isVerticalMode) {
+                    Log.d("debug_ar", "is nit vertical yet");
+                    // Adding an Anchor tells ARCore that it should track this position in
+                    // space. This anchor is created on the Plane to place the 3D model
+                    // in the correct position relative both to the world and to the plane.
+                    for (int i = 0; i < anchors.size(); i++) {
+                        Anchor anchor = anchors.get(i).anchor;
+                        duplicateAnchors.add(i, new ColoredAnchor(
+                                session.createAnchor(anchor.getPose()), DEFAULT_COLOR));
+                        nowTouchingPointIndex = -1;
+                    }
+                } else {
+                    Pose duplicatePoint1;
+                    // draw first cube
+                    Pose duplicatePoint0 = getPose(duplicateAnchors.get(0));
+                    drawObj(duplicatePoint0, virtualObject, viewmtx, projmtx, colorCorrectionRgba);
+                    selectIfHit(virtualObject, 0);
+                    // draw the rest cube
+                    for (int i = 1; i < duplicateAnchors.size(); i++) {
+                        duplicatePoint1 = getPose(duplicateAnchors.get(i));
+//              log("onDrawFrame()", "before drawObj()");
+                        drawObj(duplicatePoint1, virtualObject, viewmtx, projmtx, colorCorrectionRgba);
+                        selectIfHit(virtualObject, i);
+//              log("onDrawFrame()", "before drawLine()");
+                        drawLine(duplicatePoint0, duplicatePoint1, viewmtx, projmtx);
+                        drawLine(duplicatePoint0, getPose(anchors.get(i - 1)), viewmtx, projmtx);
+
+//              float distanceCm = ((int) (getDistance(point0, point1) * 1000)) / 10.0f;
+//              total += distanceCm;
+//              sb.append(" + ").append(distanceCm);
+
+                        duplicatePoint0 = duplicatePoint1;
+                    }
+                    drawLine(getPose(duplicateAnchors.get(duplicateAnchors.size() - 1)), getPose(duplicateAnchors.get(0)), viewmtx, projmtx);
+                    drawLine(getPose(duplicateAnchors.get(duplicateAnchors.size() - 1)), getPose(anchors.get(anchors.size() - 1)), viewmtx, projmtx);
+
+                }
+
+                isVerticalMode = true;
+            }
+        }
+
+
+        // Handle one tap per frame.
+        handleTap(frame, camera);
+
+        // Visualize anchors created by touch.
       float scaleFactor = 1.0f;
       for (ColoredAnchor coloredAnchor : anchors) {
         if (coloredAnchor.anchor.getTrackingState() != TrackingState.TRACKING) {
@@ -343,54 +455,207 @@ public class HelloArActivity extends AppCompatActivity implements GLSurfaceView.
   // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
   private void handleTap(Frame frame, Camera camera) {
     MotionEvent tap = tapHelper.poll();
-    if (tap != null && camera.getTrackingState() == TrackingState.TRACKING) {
-      for (HitResult hit : frame.hitTest(tap)) {
-        // Check if any plane was hit, and if it was hit inside the plane polygon
-        Trackable trackable = hit.getTrackable();
-        // Creates an anchor if a plane or an oriented point was hit.
-        if ((trackable instanceof Plane
-                && ((Plane) trackable).isPoseInPolygon(hit.getHitPose())
-                && (PlaneRenderer.calculateDistanceToPlane(hit.getHitPose(), camera.getPose()) > 0))
-            || (trackable instanceof Point
-                && ((Point) trackable).getOrientationMode()
-                    == OrientationMode.ESTIMATED_SURFACE_NORMAL)) {
-          // Hits are sorted by depth. Consider only closest hit on a plane or oriented point.
-          // Cap the number of objects created. This avoids overloading both the
-          // rendering system and ARCore.
-          if (anchors.size() >= 20) {
-            anchors.get(0).anchor.detach();
-            anchors.remove(0);
-          }
+      if (tap != null && camera.getTrackingState() == TrackingState.TRACKING) {
+          for (HitResult hit : frame.hitTest(tap)) {
+              // Check if any plane was hit, and if it was hit inside the plane polygon
+              Trackable trackable = hit.getTrackable();
+              // Creates an anchor if a plane or an oriented point was hit.
+              if ((trackable instanceof Plane
+                      && ((Plane) trackable).isPoseInPolygon(hit.getHitPose())
+                      && (PlaneRenderer.calculateDistanceToPlane(hit.getHitPose(), camera.getPose()) > 0))
+                      || (trackable instanceof Point
+                      && ((Point) trackable).getOrientationMode()
+                      == OrientationMode.ESTIMATED_SURFACE_NORMAL)) {
+                  // Hits are sorted by depth. Consider only closest hit on a plane or oriented point.
+                  // Cap the number of objects created. This avoids overloading both the
+                  // rendering system and ARCore.
+                  if (anchors.size() >= 20) {
+                      anchors.get(0).anchor.detach();
+                      anchors.remove(0);
+                      showingTapPointX.remove(0);
+                      showingTapPointY.remove(0);
+                  }
+                  // Assign a color to the object for rendering based on the trackable type
+                  // this anchor attached to. For AR_TRACKABLE_POINT, it's blue color, and
+                  // for AR_TRACKABLE_PLANE, it's green color.
+                  float[] objColor;
+                  if (trackable instanceof Point) {
+                      objColor = new float[] {66.0f, 133.0f, 244.0f, 255.0f};
+                  } else if (trackable instanceof Plane) {
+                      objColor = new float[] {139.0f, 195.0f, 74.0f, 255.0f};
+                  } else {
+                      objColor = DEFAULT_COLOR;
+                  }
 
-          // Assign a color to the object for rendering based on the trackable type
-          // this anchor attached to. For AR_TRACKABLE_POINT, it's blue color, and
-          // for AR_TRACKABLE_PLANE, it's green color.
-          float[] objColor;
-          if (trackable instanceof Point) {
-            objColor = new float[] {66.0f, 133.0f, 244.0f, 255.0f};
-          } else if (trackable instanceof Plane) {
-            objColor = new float[] {139.0f, 195.0f, 74.0f, 255.0f};
-          } else {
-            objColor = DEFAULT_COLOR;
-          }
+                  if (anchors.size() > 2 && tap.getX() == showingTapPointX.get(0) && tap.getY() == showingTapPointY.get(0) || isVerticalMode) {
+                      Log.d("debug_ar", "naik yuk");
+                      showingTapPointX.add(tap.getX());
+                      showingTapPointY.add(tap.getY());
+                  } else {
+                      // Adding an Anchor tells ARCore that it should track this position in
+                      // space. This anchor is created on the Plane to place the 3D model
+                      // in the correct position relative both to the world and to the plane.
+                      anchors.add(new ColoredAnchor(hit.createAnchor(), objColor));
+                      showingTapPointX.add(tap.getX());
+                      showingTapPointY.add(tap.getY());
+                      nowTouchingPointIndex = anchors.size() - 1;
+                      Log.d("debug_ar", "beloman");
+                  }
 
-          // Adding an Anchor tells ARCore that it should track this position in
-          // space. This anchor is created on the Plane to place the 3D model
-          // in the correct position relative both to the world and to the plane.
-          anchors.add(new ColoredAnchor(hit.createAnchor(), objColor));
-          break;
+
+                  break;
+              }
+          }
+      } else {
+          handleMoveEvent(nowTouchingPointIndex);
+      }
+  }
+
+    private void selectIfHit(ObjectRenderer renderer, int cubeIndex) {
+        if (isMVPMatrixHitMotionEvent(renderer.getModelViewProjectionMatrix(), tapHelper.peek())) {
+            nowTouchingPointIndex = cubeIndex;
+            tapHelper.poll();
         }
-      }
     }
-  }
 
-  /** Checks if we detected at least one plane. */
-  private boolean hasTrackingPlane() {
-    for (Plane plane : session.getAllTrackables(Plane.class)) {
-      if (plane.getTrackingState() == TrackingState.TRACKING) {
-        return true;
-      }
+    private boolean isMVPMatrixHitMotionEvent(float[] ModelViewProjectionMatrix, MotionEvent event) {
+        if (event == null) {
+            return false;
+        }
+        Matrix.multiplyMV(vertexResult, 0, ModelViewProjectionMatrix, 0, centerVertexOfCube, 0);
+        /**
+         * vertexResult = [x, y, z, w]
+         *
+         * coordinates in View
+         * ┌─────────────────────────────────────────┐╮
+         * │[0, 0]                     [viewWidth, 0]│
+         * │       [viewWidth/2, viewHeight/2]       │view height
+         * │[0, viewHeight]   [viewWidth, viewHeight]│
+         * └─────────────────────────────────────────┘╯
+         * ╰                view width               ╯
+         *
+         * coordinates in GLSurfaceView frame
+         * ┌─────────────────────────────────────────┐╮
+         * │[-1.0,  1.0]                  [1.0,  1.0]│
+         * │                 [0, 0]                  │view height
+         * │[-1.0, -1.0]                  [1.0, -1.0]│
+         * └─────────────────────────────────────────┘╯
+         * ╰                view width               ╯
+         */
+        // circle hit test
+        float radius = (viewWidth / 2) * (cubeHitAreaRadius / vertexResult[3]);
+        float dx = event.getX() - (viewWidth / 2) * (1 + vertexResult[0] / vertexResult[3]);
+        float dy = event.getY() - (viewHeight / 2) * (1 - vertexResult[1] / vertexResult[3]);
+        double distance = Math.sqrt(dx * dx + dy * dy);
+//            // for debug
+//            overlayViewForTest.setPoint("cubeCenter", screenX, screenY);
+//            overlayViewForTest.postInvalidate();
+        return distance < radius;
     }
-    return false;
-  }
+
+    private Pose getPose(ColoredAnchor anchor) {
+        Pose pose = anchor.anchor.getPose();
+        pose.getTranslation(mPoseTranslation, 0);
+        pose.getRotationQuaternion(mPoseRotation, 0);
+        return new Pose(mPoseTranslation, mPoseRotation);
+    }
+
+    private void setPoseDataToTempArray(Pose pose) {
+        pose.getTranslation(tempTranslation, 0);
+        pose.getRotationQuaternion(tempRotation, 0);
+    }
+
+    private void drawObj(Pose pose, ObjectRenderer renderer, float[] cameraView, float[] cameraPerspective, float[] lightIntensity) {
+        pose.toMatrix(anchorMatrix, 0);
+        renderer.updateModelMatrix(anchorMatrix, 1);
+        renderer.draw(cameraView, cameraPerspective, lightIntensity);
+    }
+
+    private void handleMoveEvent(int nowSelectedIndex) {
+        try {
+            if (showingTapPointX.size() < 1 || tapHelper.getScrollQueueSize() < 2) {
+                Log.d("debug_ar", "no action");
+// no action, don't move
+                return;
+            }
+
+            if (nowTouchingPointIndex == DEFAULT_VALUE & !isVerticalMode) {
+                Log.d("debug_ar", "no selected cube");
+                // no selected cube, don't move
+                return;
+            }
+
+            if (nowSelectedIndex >= showingTapPointX.size()) {
+                Log.d("debug_ar", "wrong index");
+                // wrong index, don't move.
+                return;
+            }
+
+            Log.d("debug_ar", "moving");
+            if (isVerticalMode) {
+                float scrollDx = 0;
+                float scrollDy = 0;
+                for (int i = 0; i < tapHelper.getScrollQueueSize(); i++) {
+                    scrollDx += tapHelper.pollMovementX();
+                    scrollDy += tapHelper.pollMovementY();
+                }
+
+                for (int i = 0; i < duplicateAnchors.size(); i++) {
+                    ColoredAnchor anchor = duplicateAnchors.remove(i);
+                    anchor.anchor.detach();
+                    setPoseDataToTempArray(getPose(anchor));
+                    tempTranslation[1] += (scrollDy / viewHeight);
+                    duplicateAnchors.add(i, new ColoredAnchor(
+                            session.createAnchor(new Pose(tempTranslation, tempRotation)), DEFAULT_COLOR));
+                }
+
+            } else {
+                float scrollDx = 0;
+                float scrollDy = 0;
+                for (int i = 0; i < tapHelper.getScrollQueueSize(); i++) {
+                    scrollDx += tapHelper.pollMovementX();
+                    scrollDy += tapHelper.pollMovementY();
+                }
+
+                float toX = showingTapPointX.get(nowSelectedIndex) - scrollDx;
+                showingTapPointX.remove(nowSelectedIndex);
+                showingTapPointX.add(nowSelectedIndex, toX);
+
+                float toY = showingTapPointY.get(nowSelectedIndex) - scrollDy;
+                showingTapPointY.remove(nowSelectedIndex);
+                showingTapPointY.add(nowSelectedIndex, toY);
+
+                if (anchors.size() > nowSelectedIndex) {
+                    ColoredAnchor anchor = anchors.remove(nowSelectedIndex);
+                    anchor.anchor.detach();
+                    // remove duplicated anchor
+                    setPoseDataToTempArray(getPose(anchor));
+                    tempTranslation[0] -= (scrollDx / viewWidth);
+                    tempTranslation[2] -= (scrollDy / viewHeight);
+                    anchors.add(nowSelectedIndex, new ColoredAnchor(
+                            session.createAnchor(new Pose(tempTranslation, tempRotation)), DEFAULT_COLOR));
+                }
+            }
+        } catch (NotTrackingException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void drawLine(Pose pose0, Pose pose1, float[] viewmtx, float[] projmtx) {
+        float lineWidth = 0.002f;
+        float lineWidthH = lineWidth / viewHeight * viewWidth;
+        rectRenderer.setVerts(
+                pose0.tx() - lineWidth, pose0.ty() + lineWidthH, pose0.tz() - lineWidth,
+                pose0.tx() + lineWidth, pose0.ty() + lineWidthH, pose0.tz() + lineWidth,
+                pose1.tx() + lineWidth, pose1.ty() + lineWidthH, pose1.tz() + lineWidth,
+                pose1.tx() - lineWidth, pose1.ty() + lineWidthH, pose1.tz() - lineWidth
+                ,
+                pose0.tx() - lineWidth, pose0.ty() - lineWidthH, pose0.tz() - lineWidth,
+                pose0.tx() + lineWidth, pose0.ty() - lineWidthH, pose0.tz() + lineWidth,
+                pose1.tx() + lineWidth, pose1.ty() - lineWidthH, pose1.tz() + lineWidth,
+                pose1.tx() - lineWidth, pose1.ty() - lineWidthH, pose1.tz() - lineWidth
+        );
+
+        rectRenderer.draw(viewmtx, projmtx);
+    }
 }

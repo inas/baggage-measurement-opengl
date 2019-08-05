@@ -20,10 +20,7 @@ import android.graphics.BitmapFactory;
 import android.opengl.GLES20;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
-import de.javagl.obj.Obj;
-import de.javagl.obj.ObjData;
-import de.javagl.obj.ObjReader;
-import de.javagl.obj.ObjUtils;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -31,6 +28,11 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.ShortBuffer;
+
+import de.javagl.obj.Obj;
+import de.javagl.obj.ObjData;
+import de.javagl.obj.ObjReader;
+import de.javagl.obj.ObjUtils;
 
 /** Renders an object loaded from an OBJ file in OpenGL. */
 public class ObjectRenderer {
@@ -278,7 +280,7 @@ public class ObjectRenderer {
    *
    * @param cameraView A 4x4 view matrix, in column-major order.
    * @param cameraPerspective A 4x4 projection matrix, in column-major order.
-   * @param lightIntensity Illumination intensity. Combined with diffuse and specular material
+   * @param colorCorrectionRgba Illumination intensity. Combined with diffuse and specular material
    *     properties.
    * @see #setBlendMode(BlendMode)
    * @see #updateModelMatrix(float[], float)
@@ -386,4 +388,16 @@ public class ObjectRenderer {
     v[1] *= reciprocalLength;
     v[2] *= reciprocalLength;
   }
+
+    public float[] getModelViewProjectionMatrix() {
+        return modelViewProjectionMatrix;
+    }
+
+    public float[] getModelViewMatrix() {
+        return modelViewMatrix;
+    }
+
+    public float[] getModelMatrix() {
+        return modelMatrix;
+    }
 }
